@@ -4,18 +4,35 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.websockets import WebSocketState
+from fastapi.middleware.cors import CORSMiddleware
 # from llm import LlmClient
 from llm_with_func_calling import LlmClient
 from twilio_server import TwilioClient
 from retellclient.models import operations
 from twilio.twiml.voice_response import VoiceResponse
 import asyncio
+import retellclient
 
 load_dotenv(override=True)
 
 app = FastAPI()
 
-twilio_client = TwilioClient()
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+#twilio_client = TwilioClient()
+
+retell_client = retellclient.RetellClient(api_key=os.environ['RETELL_API_KEY'],)
 
 # twilio_client.create_phone_number(213, os.environ['RETELL_AGENT_ID'])
 # twilio_client.delete_phone_number("+12133548310")
@@ -47,6 +64,29 @@ async def handle_twilio_voice_webhook(request: Request, agent_id_path: str):
     except Exception as err:
         print(f"Error in twilio voice webhook: {err}")
         return JSONResponse(status_code=500, content={"message": "Internal Server Error"})
+
+@app.get("/")
+async def root():
+    return {"message": "Hello World"}
+
+@app.post("/web-call-webhook/{agent_id}")
+async def handle_web_call_webhook(agent_id: str):
+    try:
+        print(agent_id)
+        call_response = {}
+        call_response = retell_client.register_call(operations.RegisterCallRequestBody(
+           agent_id=agent_id, 
+            audio_websocket_protocol="web", 
+            audio_encoding="s16le", 
+            sample_rate=24000
+        ))
+        print(call_response.call_detail)
+        headers = {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"}
+        return JSONResponse(status_code=200, headers=headers, content={"callId": call_response.call_detail.call_id, "sampleRate": call_response.call_detail.sample_rate })
+    except Exception as err:
+        print(f"Error in web call webhook: {err}")
+        return JSONResponse(status_code=500, content={"message": "Internal Server Error"})
+
 
 @app.websocket("/llm-websocket/{call_id}")
 async def websocket_handler(websocket: WebSocket, call_id: str):
